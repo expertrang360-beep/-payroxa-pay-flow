@@ -1,0 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: checks if the client is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper: checks if the authenticated user owns the document/user ID
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Helper: checks if the wallet belongs to the authenticated user
+    function isWalletOwner(walletId) {
+      return isAuthenticated() && (
+        resource == null || resource.data.user_id == request.auth.uid
+      ) && (
+        request.resource == null || request.resource.data.user_id == request.auth.uid
+      );
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Wallets Collection
+    match /wallets/{walletId} {
+      allow read: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+      // Allow creation and update if authenticated and user owns the wallet
+      allow create: if isAuthenticated() && request.resource.data.user_id == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.user_id == request.auth.uid && request.resource.data.user_id == request.auth.uid;
+      allow delete: if false; // Wallets are permanent
+    }
+
+    // Ledger History (Nested Subcollection under Wallets)
+    match /wallets/{walletId}/ledger/{entryId} {
+      allow read: if isAuthenticated() && get(/databases/$(database)/documents/wallets/$(walletId)).data.user_id == request.auth.uid;
+      // Users can only append ledger entries, never update or delete them (double-entry audit trail)
+      allow create: if isAuthenticated() && get(/databases/$(database)/documents/wallets/$(walletId)).data.user_id == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // Transactions Log
+    match /transactions/{transactionId} {
+      allow read: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.user_id == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+      allow delete: if false; // Audit logs are immutable
+    }
+
+    // Beneficiaries
+    match /beneficiaries/{beneficiaryId} {
+      allow read: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.user_id == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.user_id == request.auth.uid && request.resource.data.user_id == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read, update: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.user_id == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+    }
+
+    // Referrals
+    match /referrals/{referralId} {
+      allow read: if isAuthenticated() && (resource.data.referrer == request.auth.uid || resource.data.referred_user == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.referrer == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.referrer == request.auth.uid || resource.data.referred_user == request.auth.uid);
+      allow delete: if false;
+    }
+  }
+}
