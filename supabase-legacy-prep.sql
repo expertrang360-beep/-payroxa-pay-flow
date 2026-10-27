@@ -8,17 +8,22 @@
 -- Run it once in the SQL editor, then run supabase-schema.sql.
 -- Re-running is a no-op once the public tables are compatible.
 
-create temp table if not exists _payroxa_prep_log (action text);
-truncate _payroxa_prep_log;
+create schema if not exists legacy;
+revoke all on schema legacy from public, anon, authenticated;
+
+-- Regular table (not temp): the Supabase SQL editor may not keep a temp table
+-- around until the final SELECT runs.
+create table if not exists legacy.payroxa_prep_log (
+    id bigint generated always as identity primary key,
+    run_at timestamptz not null default now(),
+    action text not null
+);
 
 do $$
 declare
     r record;
     moved text[] := '{}';
 begin
-    create schema if not exists legacy;
-    revoke all on schema legacy from public, anon, authenticated;
-
     for r in
         select c.relname
         from pg_class c
@@ -46,11 +51,11 @@ begin
         end if;
         execute format('alter table public.%I set schema legacy', r.relname);
         moved := moved || r.relname::text;
-        insert into _payroxa_prep_log values (format('moved table public.%s -> legacy.%s', r.relname, r.relname));
+        insert into legacy.payroxa_prep_log (action) values (format('moved table public.%s -> legacy.%s', r.relname, r.relname));
     end loop;
 
     if cardinality(moved) = 0 then
-        insert into _payroxa_prep_log values ('nothing to do: no incompatible tables in public');
+        insert into legacy.payroxa_prep_log (action) values ('nothing to do: no incompatible tables in public');
         return;
     end if;
 
@@ -63,7 +68,7 @@ begin
           and p.prosrc ~* ('\m(' || array_to_string(moved, '|') || ')\M')
     loop
         execute format('drop trigger %I on auth.users', r.tgname);
-        insert into _payroxa_prep_log values (format('dropped trigger auth.users.%s (called %s)', r.tgname, r.proname));
+        insert into legacy.payroxa_prep_log (action) values (format('dropped trigger auth.users.%s (called %s)', r.tgname, r.proname));
     end loop;
 
     for r in
@@ -78,8 +83,11 @@ begin
           )
     loop
         execute format('alter function public.%I(%s) set schema legacy', r.proname, r.args);
-        insert into _payroxa_prep_log values (format('moved function public.%s(%s) -> legacy', r.proname, r.args));
+        insert into legacy.payroxa_prep_log (action) values (format('moved function public.%s(%s) -> legacy', r.proname, r.args));
     end loop;
 end $$;
 
-select action from _payroxa_prep_log;
+select run_at, action
+from legacy.payroxa_prep_log
+where run_at = (select max(run_at) from legacy.payroxa_prep_log)
+order by id;
