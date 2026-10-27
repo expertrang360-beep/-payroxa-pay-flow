@@ -3,6 +3,7 @@ import { Mail, Lock, User, Phone, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
+import { errorMessage } from "@/lib/rpc";
 
 export const Route = createFileRoute("/register")({
   head: () => ({ meta: [{ title: "Create account — Payroxa" }] }),
@@ -19,48 +20,48 @@ function Register() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const names = fullName.trim().split(/\s+/).filter(Boolean);
+    if (names.length < 2) {
+      toast.error("Please enter your first and last name.");
+      return;
+    }
+    if (!/^\+?[0-9\s-]{10,16}$/.test(phone.trim())) {
+      toast.error("Please enter a valid phone number.");
+      return;
+    }
+    if (password.length < 8) {
+      toast.error("Password must be at least 8 characters.");
+      return;
+    }
+
     setLoading(true);
-
     try {
-      // Create user in Supabase Auth
+      const cleanEmail = email.trim().toLowerCase();
+      // The profile and wallet are created server-side by the on_auth_user_created trigger.
       const { data, error } = await supabase.auth.signUp({
-        email,
+        email: cleanEmail,
         password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/home`,
+          data: {
+            first_name: names[0],
+            last_name: names.slice(1).join(" "),
+            phone: phone.replace(/[\s-]/g, ""),
+          },
+        },
       });
-
       if (error) throw error;
-      if (!data.user) throw new Error("No user returned from signup");
 
-      const user = data.user;
-
-      // Extract first & last name
-      const names = fullName.trim().split(" ");
-      const firstName = names[0] || "";
-      const lastName = names.slice(1).join(" ") || "User";
-
-      // Save user profile in Supabase
-      const userProfile = {
-        id: user.id,
-        first_name: firstName,
-        last_name: lastName,
-        email: email,
-        phone: phone,
-        kyc_level: 0,
-        status: "pending_verification",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      const { error: profileErr } = await supabase.from("users").insert(userProfile);
-
-      if (profileErr) throw profileErr;
-
-      toast.success("Account created successfully!");
-      nav({ to: "/verify-otp" });
+      if (data.session) {
+        toast.success("Account created successfully!");
+        nav({ to: "/home" });
+      } else {
+        toast.success("Account created! Check your email for a verification code.");
+        nav({ to: "/verify-otp", search: { email: cleanEmail } });
+      }
     } catch (err) {
       console.error("Registration error:", err);
-      const error = err as Error;
-      toast.error(error.message || "Failed to create account. Please try again.");
+      toast.error(errorMessage(err, "Failed to create account. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -136,7 +137,9 @@ function Register() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Create a password"
+                placeholder="At least 8 characters"
+                minLength={8}
+                autoComplete="new-password"
                 className="h-12 w-full rounded-2xl border border-input bg-background pl-10 pr-4 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15"
               />
             </div>

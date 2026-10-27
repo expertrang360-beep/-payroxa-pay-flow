@@ -1,30 +1,33 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { PageHeader } from "@/components/app/page-header";
+import { RequireAuth } from "@/components/app/require-auth";
 import { ArrowUpRight, ArrowDownLeft, Search } from "lucide-react";
 import { useState } from "react";
+import { useLedger, formatEntryDate } from "@/hooks/use-ledger";
+import { formatNaira } from "@/lib/utils";
 
 export const Route = createFileRoute("/transactions")({
   head: () => ({ meta: [{ title: "Transactions — Payroxa" }] }),
-  component: Transactions,
+  component: () => (
+    <RequireAuth>
+      <Transactions />
+    </RequireAuth>
+  ),
 });
-
-const all = [
-  { name: "MTN Airtime", meta: "Nov 14 · 10:24", amount: -1500, type: "debit" },
-  { name: "Wallet Funding · Card", meta: "Nov 14 · 09:31", amount: 50000, type: "credit" },
-  { name: "DSTV Compact", meta: "Nov 13 · 09:11", amount: -9500, type: "debit" },
-  { name: "Transfer to Chika O.", meta: "Nov 12 · 12:03", amount: -12000, type: "debit" },
-  { name: "Referral Bonus", meta: "Nov 11 · 15:29", amount: 500, type: "credit" },
-  { name: "Cashback · DSTV", meta: "Nov 10 · 10:00", amount: 190, type: "credit" },
-  { name: "Ikeja Electric", meta: "Nov 9 · 20:45", amount: -6500, type: "debit" },
-  { name: "Spectranet 30 days", meta: "Nov 5 · 08:00", amount: -14500, type: "debit" },
-];
 
 function Transactions() {
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<"all" | "credit" | "debit">("all");
-  const filtered = all
+  const { entries, loading, error } = useLedger(200);
+  const query = q.trim().toLowerCase();
+  const filtered = entries
     .filter((t) => (tab === "all" ? true : t.type === tab))
-    .filter((t) => t.name.toLowerCase().includes(q.toLowerCase()));
+    .filter(
+      (t) =>
+        !query ||
+        t.description.toLowerCase().includes(query) ||
+        t.reference.toLowerCase().includes(query),
+    );
 
   return (
     <div className="min-h-screen bg-surface">
@@ -36,6 +39,7 @@ function Transactions() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search transactions"
+            aria-label="Search transactions"
             className="h-11 w-full rounded-2xl border border-input bg-background pl-10 pr-4 text-sm outline-none focus:border-primary focus:ring-4 focus:ring-primary/15"
           />
         </div>
@@ -52,17 +56,25 @@ function Transactions() {
           ))}
         </div>
 
-        {filtered.length === 0 ? (
+        {loading ? (
+          <p className="mt-10 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : error ? (
+          <p className="mt-10 text-center text-sm text-destructive">{error}</p>
+        ) : filtered.length === 0 ? (
           <div className="mt-10 rounded-3xl border border-dashed border-border bg-card/40 p-8 text-center">
-            <p className="text-sm font-semibold">No transactions yet</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Fund your wallet to start making payments.
+            <p className="text-sm font-semibold">
+              {entries.length === 0 ? "No transactions yet" : "No matching transactions"}
             </p>
+            {entries.length === 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Fund your wallet to start making payments.
+              </p>
+            )}
           </div>
         ) : (
           <ul className="mt-4 divide-y divide-border rounded-3xl bg-card shadow-soft">
-            {filtered.map((t, i) => (
-              <li key={i} className="flex items-center gap-3 p-4">
+            {filtered.map((t) => (
+              <li key={t.id} className="flex items-center gap-3 p-4">
                 <span
                   className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${t.type === "credit" ? "bg-success/10 text-success" : "bg-primary-soft text-primary"}`}
                 >
@@ -73,13 +85,16 @@ function Transactions() {
                   )}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{t.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">{t.meta}</p>
+                  <p className="truncate text-sm font-medium">{t.description}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {formatEntryDate(t.created_at)} · {t.reference}
+                  </p>
                 </div>
                 <p
                   className={`text-sm font-semibold ${t.type === "credit" ? "text-success" : "text-foreground"}`}
                 >
-                  {t.type === "credit" ? "+" : "−"}₦{Math.abs(t.amount).toLocaleString()}
+                  {t.type === "credit" ? "+" : "−"}
+                  {formatNaira(t.type === "credit" ? t.credit : t.debit)}
                 </p>
               </li>
             ))}

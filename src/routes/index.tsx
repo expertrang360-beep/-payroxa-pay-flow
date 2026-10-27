@@ -1,4 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { useAuth } from "@/hooks/use-auth";
 import {
   ShieldCheck,
   Zap,
@@ -60,6 +62,12 @@ const ecosystem = [
 ];
 
 function Landing() {
+  const { user, loading } = useAuth();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!loading && user) navigate({ to: "/home", replace: true });
+  }, [loading, user, navigate]);
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-navy text-navy-foreground">
       <div className="absolute inset-0 bg-gradient-navy" />

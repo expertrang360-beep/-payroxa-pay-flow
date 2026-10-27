@@ -145,6 +145,11 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  useEffect(() => {
+    if (localStorage.getItem("payroxa-theme") === "dark") {
+      document.documentElement.classList.add("dark");
+    }
+  }, []);
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>

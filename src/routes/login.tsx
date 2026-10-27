@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { Eye, EyeOff, Fingerprint, Mail, Lock, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Eye, EyeOff, Mail, Lock, Loader2 } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 
@@ -15,6 +16,11 @@ function Login() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const nav = useNavigate();
+  const { user, loading: authLoading } = useAuth();
+
+  useEffect(() => {
+    if (!authLoading && user) nav({ to: "/home", replace: true });
+  }, [authLoading, user, nav]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,10 +28,17 @@ function Login() {
 
     try {
       const { error } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password,
       });
-      if (error) throw error;
+      if (error) {
+        if (error.code === "email_not_confirmed") {
+          toast.info("Please verify your email to continue.");
+          nav({ to: "/verify-otp", search: { email: email.trim() } });
+          return;
+        }
+        throw error;
+      }
       toast.success("Welcome back to Payroxa!");
       nav({ to: "/home" });
     } catch (err) {
@@ -54,11 +67,12 @@ function Login() {
 
         <form className="mt-8 space-y-4" onSubmit={handleLogin}>
           <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-foreground">Email or phone</span>
+            <span className="mb-1.5 block text-xs font-medium text-foreground">Email</span>
             <div className="relative">
               <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="email"
+                autoComplete="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -73,6 +87,7 @@ function Login() {
               <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
                 type={show ? "text" : "password"}
+                autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -90,14 +105,7 @@ function Login() {
             </div>
           </label>
 
-          <div className="flex items-center justify-between">
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-input text-primary focus:ring-primary"
-              />{" "}
-              Keep me signed in
-            </label>
+          <div className="flex items-center justify-end">
             <Link to="/forgot-password" className="text-xs font-semibold text-primary">
               Forgot?
             </Link>
@@ -109,16 +117,6 @@ function Login() {
             className="flex h-12 w-full items-center justify-center rounded-2xl bg-primary text-sm font-semibold text-primary-foreground shadow-glow transition hover:opacity-95 disabled:opacity-50"
           >
             {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Sign in"}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              toast.info("Biometrics registration is configured in Account Settings.");
-            }}
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-input bg-background text-sm font-semibold"
-          >
-            <Fingerprint className="h-4 w-4 text-primary" /> Use biometrics
           </button>
         </form>
 

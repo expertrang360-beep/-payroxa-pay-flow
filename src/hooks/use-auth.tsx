@@ -1,7 +1,8 @@
 import { useState, useEffect, createContext, useContext, ReactNode, useCallback } from "react";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
-import { UserProfile, Wallet } from "@/types";
-import { User as SupabaseUser } from "@supabase/supabase-js";
+import { callRpc } from "@/lib/rpc";
+import type { UserProfile, Wallet } from "@/types";
 
 export type AuthenticatedUser = SupabaseUser & { uid: string };
 
@@ -11,8 +12,9 @@ interface AuthContextType {
   wallet: Wallet | null;
   loading: boolean;
   refreshWallet: () => Promise<void>;
-  updateKyc: (level: 0 | 1 | 2 | 3) => Promise<void>;
-  updatePin: (pin: string) => Promise<void>;
+  refreshProfile: () => Promise<void>;
+  setPin: (pin: string, currentPin?: string) => Promise<void>;
+  signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -21,201 +23,85 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(false);
+  const userId = user?.id;
 
-  const createInitialWallet = useCallback(async (uid: string) => {
-    try {
-      const now = new Date().toISOString();
-      const walletId = uid;
-
-      const initialWallet: Wallet = {
-        id: walletId,
-        user_id: uid,
-        currency: "NGN",
-        available_balance: 5000, // Sign up bonus of 5,000 NGN
-        ledger_balance: 5000,
-        status: "active",
-        created_at: now,
-        updated_at: now,
-      };
-
-      const firstLedger = {
-        wallet_id: walletId,
-        reference: `REF-SIGNUP-${Date.now()}`,
-        type: "credit",
-        credit: 5000,
-        debit: 0,
-        balance_after: 5000,
-        description: "Sign-up welcome bonus",
-        status: "completed",
-        created_at: now,
-      };
-
-      // In Supabase, we can perform these inserts
-      const { error: walletErr } = await supabase.from("wallets").insert(initialWallet);
-      if (walletErr) throw walletErr;
-
-      const { error: ledgerErr } = await supabase.from("ledger").insert(firstLedger);
-      if (ledgerErr) throw ledgerErr;
-
-      // Refetch wallet
-      const { data: walletData } = await supabase
-        .from("wallets")
-        .select("*")
-        .eq("id", walletId)
-        .single();
-
-      if (walletData) {
-        setWallet(walletData as Wallet);
-      }
-    } catch (err) {
-      console.error("Failed to create initial wallet:", err);
-    }
+  const fetchProfile = useCallback(async (id: string) => {
+    const { data, error } = await supabase.from("users").select("*").eq("id", id).maybeSingle();
+    if (error) console.error("Error fetching user profile:", error);
+    setProfile((data as UserProfile | null) ?? null);
   }, []);
 
-  const fetchProfileAndWallet = useCallback(
-    async (currentUser: SupabaseUser) => {
-      try {
-        // Get profile
-        const { data: profileData, error: profileErr } = await supabase
-          .from("users")
-          .select("*")
-          .eq("id", currentUser.id)
-          .maybeSingle();
-
-        if (profileErr) {
-          console.error("Error fetching user profile:", profileErr);
-        }
-
-        if (profileData) {
-          setProfile(profileData as UserProfile);
-
-          // Get wallet - wallets document id matches the user id for simple direct lookup
-          const { data: walletData, error: walletErr } = await supabase
-            .from("wallets")
-            .select("*")
-            .eq("id", currentUser.id)
-            .maybeSingle();
-
-          if (walletErr) {
-            console.error("Error fetching wallet:", walletErr);
-          }
-
-          if (walletData) {
-            setWallet(walletData as Wallet);
-          } else {
-            // Auto create wallet if it doesn't exist yet
-            await createInitialWallet(currentUser.id);
-          }
-        }
-      } catch (err) {
-        console.error("Error fetching profile & wallet:", err);
-      }
-    },
-    [createInitialWallet],
-  );
-
-  const refreshWallet = useCallback(async () => {
-    if (!user) return;
-    try {
-      const { data: walletData } = await supabase
-        .from("wallets")
-        .select("*")
-        .eq("id", user.id)
-        .single();
-
-      if (walletData) {
-        setWallet(walletData as Wallet);
-      }
-    } catch (err) {
-      console.error("Failed to refresh wallet:", err);
-    }
-  }, [user]);
-
-  const updateKyc = async (level: 0 | 1 | 2 | 3) => {
-    if (!user || !profile) return;
-    try {
-      const now = new Date().toISOString();
-      const updated = {
-        ...profile,
-        kyc_level: level,
-        updated_at: now,
-      };
-
-      const { error } = await supabase
-        .from("users")
-        .update({ kyc_level: level, updated_at: now })
-        .eq("id", user.id);
-
-      if (error) throw error;
-      setProfile(updated);
-    } catch (err) {
-      console.error("Failed to update KYC:", err);
-      throw err;
-    }
-  };
-
-  const updatePin = async (pin: string) => {
-    if (!user || !profile) return;
-    try {
-      const now = new Date().toISOString();
-      const updated = {
-        ...profile,
-        transaction_pin: pin,
-        updated_at: now,
-      };
-
-      const { error } = await supabase
-        .from("users")
-        .update({ transaction_pin: pin, updated_at: now })
-        .eq("id", user.id);
-
-      if (error) throw error;
-      setProfile(updated);
-    } catch (err) {
-      console.error("Failed to update PIN:", err);
-      throw err;
-    }
-  };
+  const fetchWallet = useCallback(async (id: string) => {
+    const { data, error } = await supabase
+      .from("wallets")
+      .select("*")
+      .eq("user_id", id)
+      .maybeSingle();
+    if (error) console.error("Error fetching wallet:", error);
+    setWallet(
+      data
+        ? ({
+            ...data,
+            available_balance: Number(data.available_balance),
+            ledger_balance: Number(data.ledger_balance),
+          } as Wallet)
+        : null,
+    );
+  }, []);
 
   useEffect(() => {
-    // Check initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const currentUser = session?.user ?? null;
-      if (currentUser) {
-        // Normalize user so both id and uid properties are present for compatibility
-        const normalized = { ...currentUser, uid: currentUser.id };
-        setUser(normalized);
-        fetchProfileAndWallet(currentUser);
-      } else {
-        setUser(null);
-        setProfile(null);
-        setWallet(null);
-        setLoading(false);
-      }
-    });
-
-    // Listen for auth state changes
+    // Supabase emits INITIAL_SESSION on subscribe, so no separate getSession() call is needed.
+    // The callback must stay synchronous: awaiting Supabase calls here can deadlock the client.
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      const currentUser = session?.user ?? null;
-      if (currentUser) {
-        const normalized = { ...currentUser, uid: currentUser.id };
-        setUser(normalized);
-        await fetchProfileAndWallet(currentUser);
-      } else {
-        setUser(null);
-        setProfile(null);
-        setWallet(null);
-      }
-      setLoading(false);
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      const current = session?.user ?? null;
+      setUser(current ? { ...current, uid: current.id } : null);
+      setSessionLoading(false);
     });
+    return () => subscription.unsubscribe();
+  }, []);
 
+  useEffect(() => {
+    if (!userId) {
+      setProfile(null);
+      setWallet(null);
+      return;
+    }
+    let cancelled = false;
+    setDataLoading(true);
+    Promise.all([fetchProfile(userId), fetchWallet(userId)])
+      .catch((err) => console.error("Error loading account:", err))
+      .finally(() => {
+        if (!cancelled) setDataLoading(false);
+      });
     return () => {
-      subscription.unsubscribe();
+      cancelled = true;
     };
-  }, [fetchProfileAndWallet]);
+  }, [userId, fetchProfile, fetchWallet]);
+
+  const refreshWallet = useCallback(async () => {
+    if (userId) await fetchWallet(userId);
+  }, [userId, fetchWallet]);
+
+  const refreshProfile = useCallback(async () => {
+    if (userId) await fetchProfile(userId);
+  }, [userId, fetchProfile]);
+
+  const setPin = useCallback(
+    async (pin: string, currentPin?: string) => {
+      await callRpc("set_transaction_pin", { p_pin: pin, p_current_pin: currentPin ?? null });
+      await refreshProfile();
+    },
+    [refreshProfile],
+  );
+
+  const signOut = useCallback(async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+  }, []);
 
   return (
     <AuthContext.Provider
@@ -223,10 +109,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         profile,
         wallet,
-        loading,
+        loading: sessionLoading || dataLoading,
         refreshWallet,
-        updateKyc,
-        updatePin,
+        refreshProfile,
+        setPin,
+        signOut,
       }}
     >
       {children}
