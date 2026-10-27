@@ -11,6 +11,23 @@
 --     the transaction + ledger rows atomically.
 --   * Profiles and wallets are created by triggers, never by the client.
 
+-- Refuse to run on a database whose public tables belong to a different schema
+-- design (e.g. camelCase "firstName" / "userId" columns), instead of half-applying.
+do $$
+declare
+    conflicting text;
+begin
+    select string_agg(format('%I.%I', c.table_name, c.column_name), ', ')
+    into conflicting
+    from information_schema.columns c
+    where c.table_schema = 'public'
+      and c.table_name in ('users', 'wallets', 'transactions')
+      and c.column_name ~ '[A-Z]';
+    if conflicting is not null then
+        raise exception 'Payroxa schema not applied: public.users/wallets/transactions already exist with an incompatible layout (%). Use an empty Supabase project, or move the existing tables out of the public schema first (see README).', conflicting;
+    end if;
+end $$;
+
 create schema if not exists extensions;
 create extension if not exists pgcrypto with schema extensions;
 
