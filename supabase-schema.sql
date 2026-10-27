@@ -114,11 +114,11 @@ create table if not exists public.app_settings (
     updated_at timestamptz not null default now()
 );
 
--- SANDBOX: lets users credit their own wallet without a real payment.
--- Set to false in production until a payment gateway (Paystack, Flutterwave, ...)
--- credits wallets from a verified webhook instead.
+-- SANDBOX: when true, users can credit their own wallet without a real payment.
+-- Disabled by default; enable only in test environments until a payment gateway
+-- (Paystack, Flutterwave, ...) credits wallets from a verified webhook instead.
 insert into public.app_settings (key, value)
-values ('sandbox_funding', 'true'::jsonb)
+values ('sandbox_funding', 'false'::jsonb)
 on conflict (key) do nothing;
 
 -- ---------------------------------------------------------------------------
@@ -234,31 +234,44 @@ create trigger on_auth_user_confirmed
     when (old.email_confirmed_at is null and new.email_confirmed_at is not null)
     execute function public.handle_auth_user_confirmed();
 
-create or replace function public.handle_new_profile()
-returns trigger
+-- Creates a user's wallet with the welcome bonus (wallet, transaction, ledger).
+-- Idempotent: does nothing if the wallet already exists.
+create or replace function public._provision_wallet(p_user uuid)
+returns void
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
     bonus constant numeric := 5000;
-    ref text := 'PYX-BONUS-' || replace(new.id::text, '-', '');
+    ref text := 'PYX-BONUS-' || replace(p_user::text, '-', '');
     inserted integer;
 begin
     insert into public.wallets (id, user_id, available_balance, ledger_balance)
-    values (new.id, new.id, bonus, bonus)
+    values (p_user, p_user, bonus, bonus)
     on conflict (id) do nothing;
     get diagnostics inserted = row_count;
 
     if inserted > 0 then
         insert into public.transactions (reference, user_id, service, provider, amount, fee, status)
-        values (ref, new.id, 'bonus', 'payroxa', bonus, 0, 'success')
+        values (ref, p_user, 'bonus', 'payroxa', bonus, 0, 'success')
         on conflict (reference) do nothing;
 
         insert into public.ledger (wallet_id, reference, type, credit, debit, balance_after, description)
-        values (new.id, ref, 'credit', bonus, 0, bonus, 'Sign-up welcome bonus')
+        values (p_user, ref, 'credit', bonus, 0, bonus, 'Sign-up welcome bonus')
         on conflict (reference) do nothing;
     end if;
+end;
+$$;
+
+create or replace function public.handle_new_profile()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+    perform public._provision_wallet(new.id);
     return new;
 end;
 $$;
@@ -285,10 +298,9 @@ set status = 'active', updated_at = now()
 from auth.users au
 where au.id = u.id and au.email_confirmed_at is not null and u.status = 'pending_verification';
 
-insert into public.wallets (id, user_id)
-select u.id, u.id from public.users u
-where not exists (select 1 from public.wallets w where w.id = u.id)
-on conflict do nothing;
+select public._provision_wallet(u.id)
+from public.users u
+where not exists (select 1 from public.wallets w where w.id = u.id);
 
 -- ---------------------------------------------------------------------------
 -- Internal helpers (not callable by clients)
@@ -645,6 +657,7 @@ revoke execute on function public.handle_auth_user_confirmed() from public, anon
 revoke execute on function public.handle_new_profile() from public, anon, authenticated;
 revoke execute on function public._verify_pin(uuid, text) from public, anon, authenticated;
 revoke execute on function public._daily_limit(integer) from public, anon, authenticated;
+revoke execute on function public._provision_wallet(uuid) from public, anon, authenticated;
 revoke execute on function public._debit_wallet(uuid, numeric, numeric, text, text, text, jsonb) from public, anon, authenticated;
 
 revoke execute on function public.set_transaction_pin(text, text) from public, anon;

@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { PageHeader } from "@/components/app/page-header";
 import { RequireAuth } from "@/components/app/require-auth";
 import { ArrowUpRight, ArrowDownLeft, Search } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLedger, formatEntryDate } from "@/hooks/use-ledger";
 import { formatNaira } from "@/lib/utils";
 
@@ -15,19 +15,25 @@ export const Route = createFileRoute("/transactions")({
   ),
 });
 
+const PAGE_SIZE = 30;
+
 function Transactions() {
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<"all" | "credit" | "debit">("all");
-  const { entries, loading, error } = useLedger(200);
-  const query = q.trim().toLowerCase();
-  const filtered = entries
-    .filter((t) => (tab === "all" ? true : t.type === tab))
-    .filter(
-      (t) =>
-        !query ||
-        t.description.toLowerCase().includes(query) ||
-        t.reference.toLowerCase().includes(query),
-    );
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(q), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+  const {
+    entries: filtered,
+    loading,
+    error,
+    hasMore,
+    loadMore,
+    loadingMore,
+  } = useLedger(PAGE_SIZE, { type: tab === "all" ? undefined : tab, search });
+  const filtering = tab !== "all" || search.trim() !== "";
 
   return (
     <div className="min-h-screen bg-surface">
@@ -63,9 +69,9 @@ function Transactions() {
         ) : filtered.length === 0 ? (
           <div className="mt-10 rounded-3xl border border-dashed border-border bg-card/40 p-8 text-center">
             <p className="text-sm font-semibold">
-              {entries.length === 0 ? "No transactions yet" : "No matching transactions"}
+              {filtering ? "No matching transactions" : "No transactions yet"}
             </p>
-            {entries.length === 0 && (
+            {!filtering && (
               <p className="mt-1 text-xs text-muted-foreground">
                 Fund your wallet to start making payments.
               </p>
@@ -99,6 +105,16 @@ function Transactions() {
               </li>
             ))}
           </ul>
+        )}
+        {!loading && hasMore && (
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="mt-4 h-11 w-full rounded-2xl border border-input bg-card text-sm font-semibold disabled:opacity-50"
+          >
+            {loadingMore ? "Loading…" : "Load more"}
+          </button>
         )}
       </main>
     </div>

@@ -45,10 +45,12 @@ Payroxa is a mobile-first wallet and bill-payment web app built with TanStack St
 
 ## Before going live
 
-`fund_wallet` credits the wallet directly while the `sandbox_funding` flag is on. Before accepting real money, integrate a payment provider (e.g. Paystack/Flutterwave) that credits wallets from a verified server-side webhook, then disable sandbox funding:
+Wallet funding is disabled by default. `fund_wallet` credits the wallet without a real payment only while the `sandbox_funding` flag is on, so enable it only in test environments:
 
 ```sql
-update public.app_settings set value = 'false'::jsonb where key = 'sandbox_funding';
+update public.app_settings set value = 'true'::jsonb where key = 'sandbox_funding';
 ```
+
+Before accepting real money, integrate a payment provider (e.g. Paystack/Flutterwave) that credits wallets from a verified server-side webhook, and keep sandbox funding off.
 
 Bill payments and bank transfers are recorded in the ledger but are not yet dispatched to a real biller/bank provider; connect a provider before launch.

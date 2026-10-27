@@ -2,7 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Copy, Gift, Share2, Sparkles, Trophy, Users } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
-import { useLedger } from "@/hooks/use-ledger";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 import { formatNaira } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/rewards")({
@@ -16,11 +17,28 @@ export const Route = createFileRoute("/_app/rewards")({
 });
 
 function Rewards() {
-  const { profile, user } = useAuth();
-  const { entries } = useLedger(200);
-  const earned = entries
-    .filter((e) => e.type === "credit" && e.reference.startsWith("PYX-BONUS-"))
-    .reduce((sum, e) => sum + e.credit, 0);
+  const { profile, user, wallet } = useAuth();
+  const [earned, setEarned] = useState(0);
+  const walletId = wallet?.id;
+
+  useEffect(() => {
+    if (!walletId) return;
+    let cancelled = false;
+    supabase
+      .from("ledger")
+      .select("credit")
+      .eq("wallet_id", walletId)
+      .eq("type", "credit")
+      .like("reference", "PYX-BONUS-%")
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) console.error("Failed to fetch rewards:", error);
+        setEarned((data ?? []).reduce((sum, r) => sum + Number(r.credit), 0));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [walletId]);
   const code = user
     ? `PAYROXA-${(profile?.first_name || "USER").toUpperCase().replace(/[^A-Z0-9]/g, "")}-${user.id.slice(0, 4).toUpperCase()}`
     : "";

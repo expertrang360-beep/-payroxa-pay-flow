@@ -12,7 +12,7 @@ export const Route = createFileRoute("/reset-password")({
 });
 
 function ResetPassword() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, passwordRecovery, endPasswordRecovery } = useAuth();
   const nav = useNavigate();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -32,6 +32,7 @@ function ResetPassword() {
     try {
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
+      endPasswordRecovery();
       toast.success("Password updated successfully.");
       nav({ to: "/home" });
     } catch (err) {
@@ -55,7 +56,7 @@ function ResetPassword() {
         </div>
         {authLoading ? (
           <Loader2 className="mt-8 h-6 w-6 animate-spin text-primary" />
-        ) : !user ? (
+        ) : !user || !passwordRecovery ? (
           <div className="mt-4 space-y-4">
             <p className="text-sm text-muted-foreground">
               This reset link is invalid or has expired. Request a new one to continue.
