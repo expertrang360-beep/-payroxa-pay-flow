@@ -24,7 +24,7 @@ begin
       and c.table_name in ('users', 'wallets', 'transactions')
       and c.column_name ~ '[A-Z]';
     if conflicting is not null then
-        raise exception 'Payroxa schema not applied: public.users/wallets/transactions already exist with an incompatible layout (%). Use an empty Supabase project, or move the existing tables out of the public schema first (see README).', conflicting;
+        raise exception 'Payroxa schema not applied: public.users/wallets/transactions already exist with an incompatible layout (%). Run supabase-legacy-prep.sql first to move them into the legacy schema, or use an empty Supabase project.', conflicting;
     end if;
 end $$;
 

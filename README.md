@@ -19,15 +19,7 @@ Payroxa is a mobile-first wallet and bill-payment web app built with TanStack St
    VITE_SUPABASE_ANON_KEY=<anon-key>
    ```
 3. Apply the database schema: open the Supabase dashboard → **SQL Editor**, paste the contents of [`supabase-schema.sql`](./supabase-schema.sql) and run it. The script is idempotent and safe to re-run; it also migrates older Payroxa schemas (including hashing any plaintext transaction PINs).
-   If the script stops with "Payroxa schema not applied: ... incompatible layout", the project already has `users`/`wallets`/`transactions` tables from a different schema design (camelCase columns). Use a new, empty Supabase project. If you would rather reuse this one and nothing else depends on those tables, move them out of `public` (data is kept in the `legacy` schema), remove old auth triggers, then run the script again:
-   ```sql
-   create schema if not exists legacy;
-   alter table public.users set schema legacy;
-   alter table public.wallets set schema legacy;
-   alter table public.transactions set schema legacy;
-   -- List any old triggers on auth.users and drop ones that write to the moved tables:
-   select tgname from pg_trigger where tgrelid = 'auth.users'::regclass and not tgisinternal;
-   ```
+   If the script stops with "Payroxa schema not applied: ... incompatible layout", the project already has `users`/`wallets`/`transactions` tables from a different schema design. Either use a new, empty Supabase project, or (if nothing else depends on those tables) run [`supabase-legacy-prep.sql`](./supabase-legacy-prep.sql) once first. It moves the old tables and their data into a `legacy` schema, along with clashing functions, and drops old `auth.users` triggers that wrote to them. Then run `supabase-schema.sql` again.
 4. Configure Supabase Auth (dashboard → **Authentication**):
    - **URL Configuration**: set the Site URL to your deployed origin and add `<origin>/home` and `<origin>/reset-password` to the redirect allow-list (plus `http://localhost:8080/*` for local development).
    - **Email Templates → Confirm signup**: include `{{ .Token }}` so users receive the 6-digit code used on the verification screen (the confirmation link also works).
