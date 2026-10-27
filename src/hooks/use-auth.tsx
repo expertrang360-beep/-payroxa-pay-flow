@@ -1,6 +1,6 @@
 import { useState, useEffect, createContext, useContext, ReactNode, useCallback } from "react";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase";
+import { supabase, openedFromRecoveryLink } from "@/lib/supabase";
 import { callRpc } from "@/lib/rpc";
 import type { UserProfile, Wallet } from "@/types";
 
@@ -11,6 +11,8 @@ interface AuthContextType {
   profile: UserProfile | null;
   wallet: Wallet | null;
   loading: boolean;
+  passwordRecovery: boolean;
+  endPasswordRecovery: () => void;
   refreshWallet: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   setPin: (pin: string, currentPin?: string) => Promise<void>;
@@ -25,6 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
+  const [passwordRecovery, setPasswordRecovery] = useState(openedFromRecoveryLink);
   const userId = user?.id;
 
   const fetchProfile = useCallback(async (id: string) => {
@@ -56,7 +59,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // The callback must stay synchronous: awaiting Supabase calls here can deadlock the client.
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
+      if (event === "SIGNED_OUT") setPasswordRecovery(false);
       const current = session?.user ?? null;
       setUser(current ? { ...current, uid: current.id } : null);
       setSessionLoading(false);
@@ -98,6 +103,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [refreshProfile],
   );
 
+  const endPasswordRecovery = useCallback(() => setPasswordRecovery(false), []);
+
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
@@ -110,6 +117,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profile,
         wallet,
         loading: sessionLoading || dataLoading,
+        passwordRecovery,
+        endPasswordRecovery,
         refreshWallet,
         refreshProfile,
         setPin,
