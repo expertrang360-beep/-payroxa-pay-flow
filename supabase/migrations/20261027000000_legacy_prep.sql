@@ -5,8 +5,8 @@
 -- It moves those tables, with their data, into the `legacy` schema, along with
 -- public functions whose names Payroxa uses, and drops auth.users triggers that
 -- write to the moved tables (they would break sign-ups). Nothing is deleted.
--- Run it once in the SQL editor, then run supabase-schema.sql.
--- Re-running is a no-op once the public tables are compatible.
+-- Applied automatically before the Payroxa schema migration. On a fresh or
+-- already-compatible database it does nothing.
 
 create schema if not exists legacy;
 revoke all on schema legacy from public, anon, authenticated;

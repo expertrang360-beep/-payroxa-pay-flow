@@ -1,6 +1,7 @@
 -- Payroxa database schema.
 --
--- Run this whole file in the Supabase SQL editor (or `psql`). It is idempotent:
+-- Applied by the Supabase GitHub integration / `supabase db push`, or can be run
+-- manually in the SQL editor after the legacy prep migration. It is idempotent:
 -- safe to re-run, and it upgrades databases created from earlier versions of
 -- this file (plaintext PINs are hashed and client-side balance writes are revoked).
 --
@@ -24,7 +25,7 @@ begin
       and c.table_name in ('users', 'wallets', 'transactions')
       and c.column_name ~ '[A-Z]';
     if conflicting is not null then
-        raise exception 'Payroxa schema not applied: public.users/wallets/transactions already exist with an incompatible layout (%). Run supabase-legacy-prep.sql first to move them into the legacy schema, or use an empty Supabase project.', conflicting;
+        raise exception 'Payroxa schema not applied: public.users/wallets/transactions already exist with an incompatible layout (%). Apply supabase/migrations/20261027000000_legacy_prep.sql first to move them into the legacy schema, or use an empty Supabase project.', conflicting;
     end if;
 end $$;
 
