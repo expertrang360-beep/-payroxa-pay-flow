@@ -27,7 +27,7 @@ Payroxa is a mobile-first wallet and bill-payment web app built with TanStack St
 
 4. Configure Supabase Auth (dashboard → **Authentication**):
    - **URL Configuration**: set the Site URL to your deployed origin and add `<origin>/home` and `<origin>/reset-password` to the redirect allow-list (plus `http://localhost:8080/*` for local development).
-   - **Email Templates → Confirm signup**: include `{{ .Token }}` so users receive the 6-digit code used on the verification screen (the confirmation link also works).
+   - **Email Templates → Confirm signup**: set the subject to `Your Payroxa verification code` and paste [`supabase/templates/confirm-signup.html`](./supabase/templates/confirm-signup.html) as the body. It shows the 6-digit `{{ .Token }}` used on the verification screen, plus a confirmation link.
 5. Start the dev server:
    ```bash
    npm run dev
