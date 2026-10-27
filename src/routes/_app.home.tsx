@@ -18,15 +18,13 @@ import {
   ShieldCheck,
   ChevronRight,
   Sparkles,
-  TrendingUp,
-  TrendingDown,
-  Calendar,
   Landmark,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/hooks/use-auth";
+import { useLedger, formatEntryDate } from "@/hooks/use-ledger";
 import { supabase } from "@/lib/supabase";
-import { LedgerEntry } from "@/types";
+import { formatNaira } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/home")({
   head: () => ({
@@ -35,7 +33,7 @@ export const Route = createFileRoute("/_app/home")({
       {
         name: "description",
         content:
-          "Your Payroxa dashboard: wallet balance, quick actions, insights and upcoming bills.",
+          "Your Payroxa dashboard: wallet balance, quick actions, insights and recent activity.",
       },
     ],
   }),
@@ -53,61 +51,77 @@ const services = [
   { key: "airtime-to-cash", label: "A2Cash", icon: Repeat },
 ] as const;
 
-const upcoming = [
-  { name: "Ikeja Electric", due: "Due in 2 days", amount: 12500, icon: Zap },
-  { name: "DSTV Compact", due: "Due in 5 days", amount: 9500, icon: Tv },
-];
+const BILL_SERVICES = new Set(["electricity", "cable", "internet", "betting", "giftcards"]);
+const SPARK_DAYS = 12;
 
-// Sparkline points for the spending chart
-const spark = [22, 30, 18, 42, 28, 46, 34, 52, 40, 58, 48, 62];
+type SpendRow = { service: string; amount: number; fee: number; created_at: string };
 
 function HomePage() {
   const { user, profile, wallet } = useAuth();
   const [hidden, setHidden] = useState(false);
-  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const { entries: ledgerEntries, loading: ledgerLoading } = useLedger(5);
+  const [spend, setSpend] = useState<SpendRow[]>([]);
   const navigate = useNavigate();
-  const max = Math.max(...spark);
-  const points = spark
-    .map((v, i) => `${(i / (spark.length - 1)) * 100},${40 - (v / max) * 34}`)
-    .join(" ");
+  const userId = user?.id;
+  const walletVersion = wallet?.updated_at;
 
   useEffect(() => {
-    if (!user || !wallet) return;
-
-    const fetchLedger = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("ledger")
-          .select("*")
-          .eq("wallet_id", wallet.id)
-          .order("created_at", { ascending: false })
-          .limit(5);
-
-        if (error) throw error;
-        setLedgerEntries((data || []) as LedgerEntry[]);
-      } catch (err) {
-        console.error("Failed to fetch ledger entries:", err);
-      }
+    if (!userId) return;
+    let cancelled = false;
+    const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    supabase
+      .from("transactions")
+      .select("service, amount, fee, created_at")
+      .eq("user_id", userId)
+      .eq("status", "success")
+      .not("service", "in", "(fund_wallet,bonus)")
+      .gte("created_at", since)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) console.error("Failed to fetch spending:", error);
+        setSpend((data ?? []).map((r) => ({ ...r, amount: Number(r.amount), fee: Number(r.fee) })));
+      });
+    return () => {
+      cancelled = true;
     };
+  }, [userId, walletVersion]);
 
-    fetchLedger();
-  }, [user, wallet]);
+  const insights = useMemo(() => {
+    const sum = (rows: SpendRow[]) => rows.reduce((acc, r) => acc + r.amount + r.fee, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const daily = Array.from({ length: SPARK_DAYS }, (_, i) => {
+      const start = today.getTime() - (SPARK_DAYS - 1 - i) * 86_400_000;
+      return sum(
+        spend.filter((r) => {
+          const t = new Date(r.created_at).getTime();
+          return t >= start && t < start + 86_400_000;
+        }),
+      );
+    });
+    return {
+      total: sum(spend),
+      bills: sum(spend.filter((r) => BILL_SERVICES.has(r.service))),
+      transfers: sum(spend.filter((r) => r.service === "transfer")),
+      airtime: sum(spend.filter((r) => r.service === "airtime" || r.service === "data")),
+      daily,
+    };
+  }, [spend]);
+
+  const max = Math.max(...insights.daily, 1);
+  const points = insights.daily
+    .map((v, i) => `${(i / (SPARK_DAYS - 1)) * 100},${40 - (v / max) * 34}`)
+    .join(" ");
 
   const initials = profile
     ? `${profile.first_name.charAt(0)}${profile.last_name.charAt(0)}`.toUpperCase()
-    : "AK";
-
+    : "";
   const displayName = profile
-    ? `${profile.first_name} ${profile.last_name.charAt(0)}.`
-    : "Adaeze K.";
-
-  const totalBalance = wallet ? wallet.available_balance : 128450.75;
-  const kycLevel = profile ? profile.kyc_level : 2;
-  const isVerifiedString = profile
-    ? profile.status === "active"
-      ? "Verified"
-      : "Pending Verify"
-    : "Verified";
+    ? `${profile.first_name} ${profile.last_name.charAt(0)}.`.trim()
+    : (user?.email ?? "");
+  const totalBalance = wallet?.available_balance ?? 0;
+  const kycLevel = profile?.kyc_level ?? 0;
+  const isVerifiedString = profile?.status === "active" ? "Verified" : "Pending verification";
 
   return (
     <div>
@@ -124,10 +138,10 @@ function HomePage() {
           </div>
           <Link
             to="/notifications"
+            aria-label="Notifications"
             className="relative grid h-10 w-10 place-items-center rounded-xl bg-secondary hover:bg-accent"
           >
             <Bell className="h-5 w-5" />
-            <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-destructive" />
           </Link>
         </div>
       </div>
@@ -149,17 +163,11 @@ function HomePage() {
               </button>
             </div>
             <p className="mt-2 text-3xl font-bold tracking-tight">
-              {hidden
-                ? "₦ ••••••"
-                : `₦ ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+              {hidden ? "₦ ••••••" : formatNaira(totalBalance)}
             </p>
             <div className="mt-1 flex items-center gap-2 text-xs text-white/70">
               <span>
                 Tier {kycLevel} · {isVerifiedString}
-              </span>
-              <span className="h-1 w-1 rounded-full bg-white/40" />
-              <span className="inline-flex items-center gap-1 text-success-foreground/90">
-                <TrendingUp className="h-3 w-3" /> +8.2% this week
               </span>
             </div>
 
@@ -201,18 +209,11 @@ function HomePage() {
           <div className="flex items-start justify-between">
             <div>
               <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                Spending · Jul
+                Spending · last 30 days
               </p>
               <p className="mt-1 text-xl font-bold tracking-tight">
-                ₦{" "}
-                {ledgerEntries
-                  .filter((t) => t.type === "debit")
-                  .reduce((sum, t) => sum + t.debit, 0)
-                  .toLocaleString()}
+                {formatNaira(insights.total, 0)}
               </p>
-              <div className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-destructive">
-                <TrendingDown className="h-3 w-3" /> 12% less than last month
-              </div>
             </div>
             <svg viewBox="0 0 100 40" className="h-14 w-32" preserveAspectRatio="none">
               <defs>
@@ -233,43 +234,16 @@ function HomePage() {
             </svg>
           </div>
           <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border pt-4">
-            <div>
-              <p className="text-[10px] text-muted-foreground">Bills</p>
-              <p className="text-sm font-semibold">
-                ₦{" "}
-                {ledgerEntries
-                  .filter((t) => t.type === "debit" && t.description.toLowerCase().includes("bill"))
-                  .reduce((sum, t) => sum + t.debit, 0)
-                  .toLocaleString()}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] text-muted-foreground">Transfers</p>
-              <p className="text-sm font-semibold">
-                ₦{" "}
-                {ledgerEntries
-                  .filter(
-                    (t) => t.type === "debit" && t.description.toLowerCase().includes("transfer"),
-                  )
-                  .reduce((sum, t) => sum + t.debit, 0)
-                  .toLocaleString()}
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] text-muted-foreground">Airtime/Data</p>
-              <p className="text-sm font-semibold">
-                ₦{" "}
-                {ledgerEntries
-                  .filter(
-                    (t) =>
-                      t.type === "debit" &&
-                      (t.description.toLowerCase().includes("airtime") ||
-                        t.description.toLowerCase().includes("data")),
-                  )
-                  .reduce((sum, t) => sum + t.debit, 0)
-                  .toLocaleString()}
-              </p>
-            </div>
+            {[
+              { label: "Bills", value: insights.bills },
+              { label: "Transfers", value: insights.transfers },
+              { label: "Airtime/Data", value: insights.airtime },
+            ].map((c) => (
+              <div key={c.label}>
+                <p className="text-[10px] text-muted-foreground">{c.label}</p>
+                <p className="text-sm font-semibold">{formatNaira(c.value, 0)}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -300,41 +274,6 @@ function HomePage() {
             );
           })}
         </div>
-      </section>
-
-      {/* Upcoming bills */}
-      <section className="px-5 pt-6">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Upcoming bills</h2>
-          <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-medium text-warning-foreground">
-            2 due
-          </span>
-        </div>
-        <ul className="space-y-2">
-          {upcoming.map((u) => {
-            const Icon = u.icon;
-            return (
-              <li
-                key={u.name}
-                className="flex items-center gap-3 rounded-2xl bg-card p-4 shadow-soft"
-              >
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-warning/15 text-warning-foreground">
-                  <Icon className="h-5 w-5" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold">{u.name}</p>
-                  <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <Calendar className="h-3 w-3" /> {u.due}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-semibold">₦{u.amount.toLocaleString()}</p>
-                  <button className="mt-0.5 text-[11px] font-semibold text-primary">Pay now</button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
       </section>
 
       {/* Business promo */}
@@ -385,27 +324,22 @@ function HomePage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{t.description}</p>
                   <p className="truncate text-xs text-muted-foreground">
-                    {new Date(t.created_at).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                    {formatEntryDate(t.created_at)}
                   </p>
                 </div>
                 <p
                   className={`text-sm font-semibold ${t.type === "credit" ? "text-success" : "text-foreground"}`}
                 >
-                  {t.type === "credit" ? "+" : "−"}₦
-                  {Math.abs(t.type === "credit" ? t.credit : t.debit).toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                  })}
+                  {t.type === "credit" ? "+" : "−"}
+                  {formatNaira(t.type === "credit" ? t.credit : t.debit)}
                 </p>
               </li>
             ))
           ) : (
             <li className="flex flex-col items-center justify-center p-8 text-center text-muted-foreground">
-              <p className="text-sm font-medium">No recent activity</p>
+              <p className="text-sm font-medium">
+                {ledgerLoading ? "Loading…" : "No recent activity"}
+              </p>
               <p className="text-xs mt-1">Fund your wallet to make transactions.</p>
             </li>
           )}

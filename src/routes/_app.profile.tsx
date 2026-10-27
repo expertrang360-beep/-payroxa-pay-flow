@@ -6,14 +6,10 @@ import {
   HelpCircle,
   LogOut,
   BadgeCheck,
-  Fingerprint,
-  Smartphone,
   Moon,
   FileText,
-  CreditCard,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/profile")({
@@ -29,19 +25,11 @@ export const Route = createFileRoute("/_app/profile")({
 const groups = [
   {
     title: "Account",
-    items: [
-      { label: "Personal information", icon: BadgeCheck, to: "/settings" },
-      { label: "KYC verification", icon: Shield, to: "/kyc", meta: "Tier 2" },
-      { label: "Linked cards & banks", icon: CreditCard, to: "/settings" },
-    ],
+    items: [{ label: "KYC verification", icon: BadgeCheck, to: "/kyc" }],
   },
   {
     title: "Security",
-    items: [
-      { label: "Transaction PIN", icon: Shield, to: "/settings" },
-      { label: "Biometric login", icon: Fingerprint, to: "/settings" },
-      { label: "Device management", icon: Smartphone, to: "/settings" },
-    ],
+    items: [{ label: "Transaction PIN", icon: Shield, to: "/settings" }],
   },
   {
     title: "Preferences",
@@ -58,12 +46,12 @@ const groups = [
 ] as const;
 
 function Profile() {
-  const { profile } = useAuth();
+  const { profile, user, signOut } = useAuth();
   const nav = useNavigate();
 
   const handleSignOut = async () => {
     try {
-      await supabase.auth.signOut();
+      await signOut();
       toast.success("Successfully signed out.");
       nav({ to: "/login" });
     } catch (err) {
@@ -74,20 +62,14 @@ function Profile() {
 
   const initials = profile
     ? `${profile.first_name.charAt(0)}${profile.last_name.charAt(0)}`.toUpperCase()
-    : "AK";
-
-  const fullName = profile ? `${profile.first_name} ${profile.last_name}` : "Adaeze Kanu";
-
+    : "";
+  const fullName = profile ? `${profile.first_name} ${profile.last_name}`.trim() : "";
   const emailAndPhone = profile
-    ? `${profile.email} · ${profile.phone}`
-    : "adaeze@payroxa.co · +234 803 000 0000";
-
-  const kycLevel = profile ? `Tier ${profile.kyc_level}` : "Tier 2";
-  const statusString = profile
-    ? profile.status === "active"
-      ? "Verified"
-      : "Pending"
-    : "Verified";
+    ? [profile.email, profile.phone].filter(Boolean).join(" · ")
+    : (user?.email ?? "");
+  const kycLevel = `Tier ${profile?.kyc_level ?? 0}`;
+  const verified = profile?.status === "active";
+  const pinMeta = profile ? (profile.pin_set ? "Set" : "Not set") : undefined;
 
   return (
     <div>
@@ -99,8 +81,10 @@ function Profile() {
           <div className="min-w-0 flex-1">
             <p className="truncate text-base font-semibold">{fullName}</p>
             <p className="truncate text-xs text-muted-foreground">{emailAndPhone}</p>
-            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-medium text-success">
-              <BadgeCheck className="h-3 w-3" /> {statusString}
+            <span
+              className={`mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${verified ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}
+            >
+              <BadgeCheck className="h-3 w-3" /> {verified ? "Verified" : "Pending"}
             </span>
           </div>
         </div>
@@ -114,8 +98,12 @@ function Profile() {
           <ul className="divide-y divide-border rounded-2xl bg-card shadow-soft">
             {g.items.map((it) => {
               const Icon = it.icon;
-              const metaVal =
-                it.label === "KYC verification" ? kycLevel : "meta" in it ? it.meta : undefined;
+              const metaVal: string | undefined =
+                it.label === "KYC verification"
+                  ? kycLevel
+                  : it.label === "Transaction PIN"
+                    ? pinMeta
+                    : undefined;
               return (
                 <li key={it.label}>
                   <Link to={it.to} className="flex items-center gap-3 p-4 hover:bg-secondary/60">

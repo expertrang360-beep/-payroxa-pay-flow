@@ -1,9 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowDownLeft, ArrowUpRight, Plus, Send, Filter, Eye, EyeOff } from "lucide-react";
-import { useState, useEffect } from "react";
+import { ArrowDownLeft, ArrowUpRight, Plus, Send, Eye, EyeOff } from "lucide-react";
+import { useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
-import { supabase } from "@/lib/supabase";
-import { LedgerEntry } from "@/types";
+import { useLedger, formatEntryDate } from "@/hooks/use-ledger";
+import { formatNaira } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/wallet")({
   head: () => ({
@@ -16,33 +16,10 @@ export const Route = createFileRoute("/_app/wallet")({
 });
 
 function WalletPage() {
-  const { user, wallet } = useAuth();
+  const { wallet } = useAuth();
   const [hidden, setHidden] = useState(false);
-  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
-
-  useEffect(() => {
-    if (!user || !wallet) return;
-
-    const fetchLedger = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("ledger")
-          .select("*")
-          .eq("wallet_id", wallet.id)
-          .order("created_at", { ascending: false })
-          .limit(15);
-
-        if (error) throw error;
-        setLedgerEntries((data || []) as LedgerEntry[]);
-      } catch (err) {
-        console.error("Failed to fetch ledger entries:", err);
-      }
-    };
-
-    fetchLedger();
-  }, [user, wallet]);
-
-  const totalBalance = wallet ? wallet.available_balance : 128450.75;
+  const { entries: ledgerEntries, loading, error } = useLedger(15);
+  const totalBalance = wallet?.available_balance ?? 0;
 
   // Calculate stats from ledger
   const inflow = ledgerEntries
@@ -73,14 +50,13 @@ function WalletPage() {
             <button
               onClick={() => setHidden(!hidden)}
               className="grid h-8 w-8 place-items-center rounded-lg bg-white/10"
+              aria-label="Toggle balance"
             >
               {hidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           </div>
           <p className="mt-2 text-3xl font-bold tracking-tight">
-            {hidden
-              ? "₦ ••••••"
-              : `₦ ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+            {hidden ? "₦ ••••••" : formatNaira(totalBalance)}
           </p>
           <div className="mt-4 grid grid-cols-2 gap-2">
             <Link
@@ -102,9 +78,9 @@ function WalletPage() {
       <section className="px-5 pt-6">
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: "Inflow", value: `₦ ${inflow.toLocaleString()}` },
-            { label: "Outflow", value: `₦ ${outflow.toLocaleString()}` },
-            { label: "Rewards", value: `₦ ${rewards.toLocaleString()}` },
+            { label: "Inflow", value: formatNaira(inflow, 0) },
+            { label: "Outflow", value: formatNaira(outflow, 0) },
+            { label: "Rewards", value: formatNaira(rewards, 0) },
           ].map((s) => (
             <div key={s.label} className="rounded-2xl bg-card p-3 text-center shadow-soft">
               <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -119,9 +95,12 @@ function WalletPage() {
       <section className="px-5 pb-8 pt-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold">Transactions</h2>
-          <button className="inline-flex items-center gap-1 rounded-lg bg-secondary px-2.5 py-1 text-xs font-medium text-foreground">
-            <Filter className="h-3.5 w-3.5" /> Filter
-          </button>
+          <Link
+            to="/transactions"
+            className="inline-flex items-center gap-1 rounded-lg bg-secondary px-2.5 py-1 text-xs font-medium text-foreground"
+          >
+            View all
+          </Link>
         </div>
         <ul className="divide-y divide-border rounded-3xl bg-card shadow-soft">
           {ledgerEntries.length > 0 ? (
@@ -139,28 +118,25 @@ function WalletPage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{t.description}</p>
                   <p className="truncate text-xs text-muted-foreground">
-                    {new Date(t.created_at).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                    {formatEntryDate(t.created_at)}
                   </p>
                 </div>
                 <p
                   className={`text-sm font-semibold ${t.type === "credit" ? "text-success" : "text-foreground"}`}
                 >
-                  {t.type === "credit" ? "+" : "−"}₦
-                  {Math.abs(t.type === "credit" ? t.credit : t.debit).toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                  })}
+                  {t.type === "credit" ? "+" : "−"}
+                  {formatNaira(t.type === "credit" ? t.credit : t.debit)}
                 </p>
               </li>
             ))
           ) : (
             <li className="flex flex-col items-center justify-center p-8 text-center text-muted-foreground">
-              <p className="text-sm font-medium">No transactions found</p>
-              <p className="text-xs mt-1">Make a transfer or fund your account to get started.</p>
+              <p className="text-sm font-medium">
+                {loading ? "Loading…" : (error ?? "No transactions found")}
+              </p>
+              {!loading && !error && (
+                <p className="text-xs mt-1">Make a transfer or fund your account to get started.</p>
+              )}
             </li>
           )}
         </ul>

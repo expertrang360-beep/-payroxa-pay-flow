@@ -4,118 +4,62 @@ import { CreditCard, Banknote, Building2, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
-import { supabase } from "@/lib/supabase";
+import { RequireAuth } from "@/components/app/require-auth";
+import { callRpc, errorMessage } from "@/lib/rpc";
+import { formatNaira } from "@/lib/utils";
 
 export const Route = createFileRoute("/fund-wallet")({
   head: () => ({ meta: [{ title: "Fund Wallet — Payroxa" }] }),
-  component: Fund,
+  component: () => (
+    <RequireAuth>
+      <Fund />
+    </RequireAuth>
+  ),
 });
 
+const MIN_FUNDING = 100;
+const MAX_FUNDING = 1_000_000;
+
 const methods = [
-  { key: "card", label: "Debit / Credit Card", icon: CreditCard, meta: "Instant · 1.5% fee" },
+  { key: "card", label: "Debit / Credit Card", icon: CreditCard, meta: "Instant" },
   { key: "transfer", label: "Bank Transfer", icon: Building2, meta: "Free · 2 min" },
   { key: "ussd", label: "USSD", icon: Banknote, meta: "Any bank" },
 ];
 
 function Fund() {
   const nav = useNavigate();
-  const { user, wallet, refreshWallet } = useAuth();
+  const { wallet, refreshWallet } = useAuth();
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("card");
   const [loading, setLoading] = useState(false);
 
   const handleFund = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !wallet) {
-      toast.error("Please sign in to fund your wallet.");
+    if (!wallet) {
+      toast.error("Your wallet is not available yet. Please try again shortly.");
       return;
     }
-
     const fundAmount = Number(amount);
-    if (isNaN(fundAmount) || fundAmount <= 0) {
-      toast.error("Please enter a valid amount.");
+    if (!Number.isFinite(fundAmount) || fundAmount < MIN_FUNDING) {
+      toast.error(`Minimum funding amount is ${formatNaira(MIN_FUNDING, 0)}.`);
+      return;
+    }
+    if (fundAmount > MAX_FUNDING) {
+      toast.error(`Maximum funding amount is ${formatNaira(MAX_FUNDING, 0)}.`);
       return;
     }
 
     setLoading(true);
-
     try {
-      const now = new Date().toISOString();
-      const transactionRef = `TX-FUND-${Date.now()}`;
-
-      // Fetch current wallet state inside transaction
-      const { data: walletData, error: walletFetchErr } = await supabase
-        .from("wallets")
-        .select("available_balance")
-        .eq("id", wallet.id)
-        .single();
-
-      if (walletFetchErr) throw walletFetchErr;
-      if (!walletData) throw new Error("Wallet not found.");
-
-      const currentBalance = walletData.available_balance;
-      const newBalance = currentBalance + fundAmount;
-
-      // Update Wallet document balance atomically
-      const { error: walletUpdateErr } = await supabase
-        .from("wallets")
-        .update({
-          available_balance: newBalance,
-          ledger_balance: newBalance,
-          updated_at: now,
-        })
-        .eq("id", wallet.id);
-
-      if (walletUpdateErr) throw walletUpdateErr;
-
-      // Create transaction entry
-      const newTransaction = {
-        reference: transactionRef,
-        user_id: user.id,
-        service: "fund",
-        provider: "payroxa-engine",
-        amount: fundAmount,
-        fee: 0,
-        status: "success",
-        provider_reference: transactionRef,
-        created_at: now,
-        metadata: {
-          method,
-        },
-      };
-
-      const { error: txErr } = await supabase.from("transactions").insert(newTransaction);
-
-      if (txErr) throw txErr;
-
-      // Create double-entry ledger entry
-      const newLedger = {
-        wallet_id: wallet.id,
-        reference: transactionRef,
-        type: "credit",
-        credit: fundAmount,
-        debit: 0,
-        balance_after: newBalance,
-        description: `Wallet funded via ${method.toUpperCase()}`,
-        status: "completed",
-        created_at: now,
-      };
-
-      const { error: ledgerErr } = await supabase.from("ledger").insert(newLedger);
-
-      if (ledgerErr) throw ledgerErr;
-
+      const result = await callRpc("fund_wallet", { p_amount: fundAmount, p_method: method });
       await refreshWallet();
-
       toast.success("Wallet funded successfully!", {
-        description: `₦${fundAmount.toLocaleString()} has been added to your balance.`,
+        description: `${formatNaira(fundAmount)} has been added to your balance. Ref: ${result.reference}`,
       });
-
-      setTimeout(() => nav({ to: "/wallet" }), 1000);
+      nav({ to: "/wallet" });
     } catch (err) {
       console.error("Funding error:", err);
-      const error = err as Error;
-      toast.error(error.message || "Failed to fund wallet. Please try again.");
+      toast.error(errorMessage(err, "Failed to fund wallet. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -136,7 +80,7 @@ function Fund() {
                 required
                 inputMode="numeric"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value.replace(/\D/g, ""))}
+                onChange={(e) => setAmount(e.target.value.replace(/\D/g, "").slice(0, 7))}
                 className="h-16 w-full rounded-2xl border border-input bg-background pl-10 pr-4 text-2xl font-bold outline-none focus:border-primary focus:ring-4 focus:ring-primary/15"
                 placeholder="0"
               />

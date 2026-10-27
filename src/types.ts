@@ -6,7 +6,7 @@ export interface UserProfile {
   phone: string;
   kyc_level: 0 | 1 | 2 | 3;
   status: "active" | "suspended" | "pending_verification";
-  transaction_pin?: string;
+  pin_set: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -39,7 +39,17 @@ export interface Transaction {
   id: string;
   reference: string;
   user_id: string;
-  service: "airtime" | "data" | "electricity" | "cable" | "transfer" | "fund_wallet";
+  service:
+    | "airtime"
+    | "data"
+    | "electricity"
+    | "cable"
+    | "internet"
+    | "betting"
+    | "giftcards"
+    | "transfer"
+    | "fund_wallet"
+    | "bonus";
   provider: string;
   amount: number;
   fee: number;

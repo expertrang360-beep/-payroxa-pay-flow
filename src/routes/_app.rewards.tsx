@@ -1,6 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Copy, Gift, Share2, Sparkles, Trophy, Users } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/use-auth";
+import { useLedger } from "@/hooks/use-ledger";
+import { formatNaira } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/rewards")({
   head: () => ({
@@ -13,7 +16,37 @@ export const Route = createFileRoute("/_app/rewards")({
 });
 
 function Rewards() {
-  const code = "PAYROXA-ADAEZE";
+  const { profile, user } = useAuth();
+  const { entries } = useLedger(200);
+  const earned = entries
+    .filter((e) => e.type === "credit" && e.reference.startsWith("PYX-BONUS-"))
+    .reduce((sum, e) => sum + e.credit, 0);
+  const code = user
+    ? `PAYROXA-${(profile?.first_name || "USER").toUpperCase().replace(/[^A-Z0-9]/g, "")}-${user.id.slice(0, 4).toUpperCase()}`
+    : "";
+
+  const copyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast.success("Referral code copied");
+    } catch {
+      toast.error("Could not copy code");
+    }
+  };
+
+  const shareInvite = async () => {
+    const text = `Join me on Payroxa! Use my referral code ${code} when you sign up.`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Payroxa", text, url: window.location.origin });
+      } catch {
+        // user cancelled the share sheet
+      }
+    } else {
+      await navigator.clipboard?.writeText(`${text} ${window.location.origin}`);
+      toast.success("Invite message copied");
+    }
+  };
   return (
     <div>
       <div className="px-5 pt-6">
@@ -27,24 +60,18 @@ function Rewards() {
           <div className="relative flex items-start justify-between">
             <div>
               <p className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider">
-                <Trophy className="h-3 w-3" /> Silver tier
+                <Trophy className="h-3 w-3" /> Member
               </p>
-              <p className="mt-3 text-xs text-white/70">Rewards balance</p>
-              <p className="text-3xl font-bold tracking-tight">₦ 3,240</p>
+              <p className="mt-3 text-xs text-white/70">Rewards earned</p>
+              <p className="text-3xl font-bold tracking-tight">{formatNaira(earned, 0)}</p>
             </div>
             <span className="grid h-14 w-14 place-items-center rounded-2xl bg-white/10">
               <Gift className="h-7 w-7" />
             </span>
           </div>
-          <div className="relative mt-5">
-            <div className="flex items-center justify-between text-[11px] text-white/60">
-              <span>Silver</span>
-              <span>Gold · ₦10,000</span>
-            </div>
-            <div className="mt-1 h-2 overflow-hidden rounded-full bg-white/10">
-              <div className="h-full w-1/3 rounded-full bg-white" />
-            </div>
-          </div>
+          <p className="relative mt-5 text-[11px] text-white/60">
+            Includes your sign-up bonus. Loyalty tiers are coming soon.
+          </p>
         </div>
       </section>
 
@@ -56,38 +83,27 @@ function Rewards() {
             </span>
             <div>
               <h2 className="text-sm font-semibold">Refer & Earn</h2>
-              <p className="text-xs text-muted-foreground">Earn ₦500 for every friend who joins.</p>
+              <p className="text-xs text-muted-foreground">Invite friends to join Payroxa.</p>
             </div>
           </div>
           <div className="mt-4 flex items-center justify-between rounded-2xl bg-secondary p-3">
             <p className="font-mono text-sm">{code}</p>
             <button
-              onClick={() => {
-                navigator.clipboard?.writeText(code);
-                toast.success("Referral code copied");
-              }}
+              onClick={copyCode}
               className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
             >
               <Copy className="h-3.5 w-3.5" /> Copy
             </button>
           </div>
-          <button className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-primary/30 py-3 text-sm font-semibold text-primary">
+          <button
+            onClick={shareInvite}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-primary/30 py-3 text-sm font-semibold text-primary"
+          >
             <Share2 className="h-4 w-4" /> Share invite
           </button>
-          <div className="mt-4 grid grid-cols-3 gap-3 text-center">
-            {[
-              { label: "Invited", value: "12" },
-              { label: "Joined", value: "7" },
-              { label: "Earned", value: "₦3.5k" },
-            ].map((s) => (
-              <div key={s.label} className="rounded-xl bg-secondary py-2">
-                <p className="text-sm font-semibold">{s.value}</p>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  {s.label}
-                </p>
-              </div>
-            ))}
-          </div>
+          <p className="mt-3 text-center text-[11px] text-muted-foreground">
+            Referral tracking is coming soon.
+          </p>
         </div>
       </section>
 
@@ -110,9 +126,9 @@ function Rewards() {
                 <p className="truncate text-sm font-semibold">{o.title}</p>
                 <p className="truncate text-xs text-muted-foreground">{o.meta}</p>
               </div>
-              <button className="rounded-lg bg-primary-soft px-3 py-1.5 text-xs font-semibold text-primary">
-                Claim
-              </button>
+              <span className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-semibold text-muted-foreground">
+                Soon
+              </span>
             </li>
           ))}
         </ul>

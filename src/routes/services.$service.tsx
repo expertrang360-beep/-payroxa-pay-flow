@@ -13,8 +13,14 @@ import {
   CheckCircle2,
   Lock,
   ShieldCheck,
+  Loader2,
 } from "lucide-react";
 import { useState, ComponentType } from "react";
+import { toast } from "sonner";
+import { RequireAuth } from "@/components/app/require-auth";
+import { useAuth } from "@/hooks/use-auth";
+import { callRpc, errorMessage, type RpcResult } from "@/lib/rpc";
+import { formatNaira } from "@/lib/utils";
 
 const META: Record<
   string,
@@ -24,6 +30,7 @@ const META: Record<
     icon: ComponentType<{ className?: string }>;
     unit: string;
     providers: string[];
+    comingSoon?: boolean;
   }
 > = {
   airtime: {
@@ -81,15 +88,23 @@ const META: Record<
     icon: Repeat,
     unit: "Amount",
     providers: ["MTN", "Airtel", "Glo", "9mobile"],
+    comingSoon: true,
   },
 };
+
+const MIN_AMOUNT = 50;
+const MAX_AMOUNT = 1_000_000;
 
 export const Route = createFileRoute("/services/$service")({
   head: ({ params }) => {
     const m = META[params.service];
     return { meta: [{ title: `${m?.title ?? "Service"} — Payroxa` }] };
   },
-  component: Service,
+  component: () => (
+    <RequireAuth>
+      <Service />
+    </RequireAuth>
+  ),
 });
 
 type Step = "form" | "confirm" | "pin" | "success";
@@ -103,6 +118,10 @@ function Service() {
   const [amount, setAmount] = useState("");
   const [target, setTarget] = useState("");
   const [pin, setPin] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [receipt, setReceipt] = useState<RpcResult | null>(null);
+  const { wallet, profile, refreshWallet } = useAuth();
+  const balance = wallet?.available_balance ?? 0;
 
   if (!meta) {
     return (
@@ -114,10 +133,49 @@ function Service() {
       </div>
     );
   }
+  if (meta.comingSoon) {
+    return (
+      <div className="min-h-screen bg-surface">
+        <PageHeader title={meta.title} back="/payments" />
+        <div className="mx-auto max-w-md p-6 text-center text-sm text-muted-foreground">
+          {meta.title} is coming soon.
+        </div>
+      </div>
+    );
+  }
   const Icon = meta.icon;
   const amountNum = Number(amount || 0);
   const fee = amountNum > 0 ? Math.max(20, Math.round(amountNum * 0.005)) : 0;
   const total = amountNum + fee;
+
+  const reset = () => {
+    setStep("form");
+    setAmount("");
+    setTarget("");
+    setPin("");
+    setReceipt(null);
+  };
+
+  const submitPayment = async (enteredPin: string) => {
+    setSubmitting(true);
+    try {
+      const result = await callRpc("pay_bill", {
+        p_service: service,
+        p_provider: provider,
+        p_target: target.trim(),
+        p_amount: amountNum,
+        p_pin: enteredPin,
+      });
+      setReceipt(result);
+      setStep("success");
+      await refreshWallet();
+    } catch (err) {
+      toast.error(errorMessage(err, "Payment failed. Please try again."));
+      setPin("");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-surface">
@@ -144,7 +202,9 @@ function Service() {
               </span>
               <div>
                 <p className="text-sm font-semibold">{meta.title}</p>
-                <p className="text-xs text-muted-foreground">Wallet balance: ₦ 128,450.75</p>
+                <p className="text-xs text-muted-foreground">
+                  Wallet balance: {formatNaira(balance)}
+                </p>
               </div>
             </div>
 
@@ -152,6 +212,22 @@ function Service() {
               className="mt-5 space-y-4"
               onSubmit={(e) => {
                 e.preventDefault();
+                if (!target.trim()) {
+                  toast.error(`Enter a valid ${meta.label.toLowerCase()}.`);
+                  return;
+                }
+                if (amountNum < MIN_AMOUNT || amountNum > MAX_AMOUNT) {
+                  toast.error(
+                    `Amount must be between ${formatNaira(MIN_AMOUNT, 0)} and ${formatNaira(MAX_AMOUNT, 0)}.`,
+                  );
+                  return;
+                }
+                if (total > balance) {
+                  toast.error("Insufficient balance.", {
+                    description: `You need ${formatNaira(total)} including fees.`,
+                  });
+                  return;
+                }
                 setStep("confirm");
               }}
             >
@@ -181,6 +257,7 @@ function Service() {
                   required
                   value={target}
                   onChange={(e) => setTarget(e.target.value)}
+                  maxLength={100}
                   className="h-12 w-full rounded-2xl border border-input bg-background px-4 text-sm outline-none focus:border-primary focus:ring-4 focus:ring-primary/15"
                   placeholder="Enter details"
                 />
@@ -196,7 +273,7 @@ function Service() {
                     required
                     inputMode="numeric"
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value.replace(/\D/g, ""))}
+                    onChange={(e) => setAmount(e.target.value.replace(/\D/g, "").slice(0, 7))}
                     className="h-12 w-full rounded-2xl border border-input bg-background pl-8 pr-4 text-sm outline-none focus:border-primary focus:ring-4 focus:ring-primary/15"
                     placeholder="0"
                   />
@@ -264,8 +341,19 @@ function Service() {
             <p className="mt-4 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
               <ShieldCheck className="h-3 w-3 text-success" /> Protected by Payroxa Secure
             </p>
+            {profile && !profile.pin_set && (
+              <p className="mt-4 rounded-2xl bg-warning/10 p-3 text-xs">
+                You need to set a transaction PIN in Settings before paying.
+              </p>
+            )}
             <button
-              onClick={() => setStep("pin")}
+              onClick={() => {
+                if (profile && !profile.pin_set) {
+                  nav({ to: "/settings" });
+                  return;
+                }
+                setStep("pin");
+              }}
               className="mt-4 h-12 w-full rounded-2xl bg-primary text-sm font-semibold text-primary-foreground shadow-glow"
             >
               Confirm & pay
@@ -282,6 +370,12 @@ function Service() {
             <p className="mt-1 text-center text-xs text-muted-foreground">
               Authorize ₦{total.toLocaleString()} to {provider}
             </p>
+            {submitting && (
+              <Loader2
+                className="mx-auto mt-3 h-5 w-5 animate-spin text-primary"
+                aria-label="Processing"
+              />
+            )}
 
             <div className="mt-6 flex justify-center gap-3">
               {[0, 1, 2, 3].map((i) => (
@@ -298,16 +392,16 @@ function Service() {
               {["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].map((k, index) => (
                 <button
                   key={`${k}-${index}`}
-                  disabled={!k}
+                  disabled={!k || submitting}
                   onClick={() => {
                     if (k === "⌫") setPin((p) => p.slice(0, -1));
                     else if (k && pin.length < 4) {
                       const next = pin + k;
                       setPin(next);
-                      if (next.length === 4) setTimeout(() => setStep("success"), 350);
+                      if (next.length === 4) submitPayment(next);
                     }
                   }}
-                  className="h-14 rounded-2xl bg-card text-xl font-semibold shadow-soft transition active:scale-95 disabled:opacity-0"
+                  className={`h-14 rounded-2xl bg-card text-xl font-semibold shadow-soft transition active:scale-95 disabled:opacity-40 ${k ? "" : "invisible"}`}
                 >
                   {k}
                 </button>
@@ -330,7 +424,7 @@ function Service() {
               <dl className="space-y-3 text-sm">
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">Reference</dt>
-                  <dd className="font-mono text-xs">PYX-{Date.now().toString().slice(-8)}</dd>
+                  <dd className="font-mono text-xs">{receipt?.reference}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">{meta.label}</dt>
@@ -345,12 +439,7 @@ function Service() {
 
             <div className="mt-6 grid grid-cols-2 gap-3">
               <button
-                onClick={() => {
-                  setStep("form");
-                  setAmount("");
-                  setTarget("");
-                  setPin("");
-                }}
+                onClick={reset}
                 className="h-12 rounded-2xl border border-input bg-card text-sm font-semibold"
               >
                 Repeat
